@@ -27,6 +27,7 @@
 
 *{box-sizing:border-box}
 body{margin:0}
+[hidden]{display:none!important}
 body{background:var(--paper);color:var(--ink);font-family:var(--font-body);font-size:1.0625rem;line-height:1.6;overflow-x:hidden;
   background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);background-size:28px 28px}
 body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--paper)}
@@ -144,7 +145,7 @@ footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px}
 .side h2{font-size:2rem;font-weight:800}
 .side p{opacity:.85;margin-top:12px}
 .stepper{display:grid;gap:10px;font-family:var(--font-mono);font-size:.82rem}
-.stepper span{display:flex;gap:10px;align-items:center;opacity:.55}
+.stepper span{display:flex;gap:10px;align-items:center;opacity:.8}
 .stepper span.on{opacity:1}
 .stepper span::before{content:"";width:14px;height:14px;border:2px solid currentColor}
 .stepper span.on::before{background:currentColor}
@@ -297,13 +298,13 @@ legend{font-size:.88rem;font-weight:600;margin-bottom:8px}
     <div class="side">
       <div>
         <h2 id="side-title">Únete a TDZ</h2>
-        <p id="side-text">Primero el newsletter, luego tu proyecto. Toma menos de dos minutos.</p>
+        <p id="side-text">Ideas, innovación y convocatorias del workshop en tu correo.</p>
       </div>
-      <div class="stepper" aria-hidden="true"><span id="s1" class="on">Newsletter</span><span id="s2">Tu proyecto</span></div>
+      <div class="stepper" aria-hidden="true"><span>@thedesertzone_</span></div>
     </div>
     <div class="main">
       <div id="step-newsletter" style="display:grid;gap:16px">
-        <span class="label">Paso 1 de 2</span>
+        <span class="label">Newsletter</span>
         <h3 style="font-size:1.7rem;font-weight:800">Recibe el newsletter</h3>
         <form id="f-nl" novalidate>
           <div class="two">
@@ -323,7 +324,7 @@ legend{font-size:.88rem;font-weight:600;margin-bottom:8px}
       </div>
 
       <div id="step-project" hidden style="display:grid;gap:16px">
-        <span class="label">Paso 2 de 2</span>
+        <span class="label">Workshop · Team</span>
         <h3 style="font-size:1.7rem;font-weight:800">Comparte tu proyecto</h3>
         <form id="f-pj" novalidate>
           <div class="two">
@@ -365,26 +366,42 @@ async function saveSheet(payload){
 async function save(col, type, data){ return saveSheet({type,...data}); }
 
 const $ = id => document.getElementById(id);
-const overlay = $('overlay'); const st = {nl:false,pj:false,tried:false}; let back=null;
+const PROJECT_DELAY = 10000; // 10 segundos navegando antes de mostrar el modal de proyecto
+const overlay = $('overlay');
+const st = {nl:false, pj:false};
+let back=null, projectShown=false, projectTimer=null, autoClose=null;
 const steps = {newsletter:$('step-newsletter'), project:$('step-project'), done:$('step-done')};
 const sideCopy = {
-  newsletter:['Únete a TDZ','Primero el newsletter, luego tu proyecto. Toma menos de dos minutos.'],
-  project:['Tu proyecto','Cuéntanos qué construyes. Leemos cada proyecto que llega.'],
+  newsletter:['Únete a TDZ','Ideas, innovación y convocatorias del workshop en tu correo.'],
+  project:['¿Estás construyendo algo?','Cuéntanos tu proyecto. Leemos cada uno y te escribimos si encaja con el workshop o el team.'],
   done:['Gracias','Ya formas parte de la conversación.']
 };
 function show(k){
+  clearTimeout(autoClose);
+  if(k==='project'){ projectShown=true; clearTimeout(projectTimer); }
   for(const s in steps) steps[s].hidden = s!==k;
-  $('s1').className = 'on'; $('s2').className = k==='newsletter' ? '' : 'on';
   $('side-title').textContent = sideCopy[k][0]; $('side-text').textContent = sideCopy[k][1];
   if(overlay.hidden){ back=document.activeElement; overlay.hidden=false; document.body.style.overflow='hidden'; }
   const f = steps[k].querySelector('input,.btn'); if(f) setTimeout(()=>f.focus({preventScroll:true}),40);
 }
-function close(){ overlay.hidden=true; document.body.style.overflow=''; back?.focus?.(); }
+function close(){
+  clearTimeout(autoClose);
+  overlay.hidden=true; document.body.style.overflow=''; back?.focus?.();
+  scheduleProject();
+}
+/* Al cerrar cualquier modal empieza a contar la navegación; a los 10 s aparece el de proyecto (una vez por visita). */
+function scheduleProject(){
+  if(projectShown || st.pj || projectTimer) return;
+  projectTimer = setTimeout(function tick(){
+    if(!overlay.hidden){ projectTimer = setTimeout(tick, 2000); return; } // espera si hay otro modal abierto
+    projectTimer = null; show('project');
+  }, PROJECT_DELAY);
+}
 document.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>show(b.dataset.open));
 $('x').onclick=close; $('done-btn').onclick=close;
 overlay.addEventListener('click',e=>{ if(e.target===overlay) close(); });
 addEventListener('keydown',e=>{ if(e.key==='Escape' && !overlay.hidden) close(); });
-$('nl-skip').onclick=()=>show('project'); $('pj-skip').onclick=finish;
+$('nl-skip').onclick=close; $('pj-skip').onclick=close;
 
 const okEmail = v => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v);
 const err = (id,m)=>{ $(id).textContent=m; $(id).hidden=!m; };
@@ -397,11 +414,13 @@ $('f-nl').addEventListener('submit', async e=>{
   err('nl-err','');
   const interests=[...document.querySelectorAll('.chips input:checked')].map(i=>i.value);
   const b=$('nl-btn'); b.disabled=true; b.textContent='Guardando…';
-  st.tried=true; st.nl = await save('newsletter','newsletter',{name:val('nl-name'),email:val('nl-email'),interests});
+  st.nl = await save('newsletter','newsletter',{name:val('nl-name'),email:val('nl-email'),interests});
   b.disabled=false; b.textContent='Suscribirme →';
   if(!$('pj-name').value) $('pj-name').value=val('nl-name');
   if(!$('pj-email').value) $('pj-email').value=val('nl-email');
-  show('project');
+  done(st.nl ? ['Ya estás dentro','Quedaste suscrito al newsletter. Sigue explorando la página.']
+             : ['No se pudo enviar','Inténtalo de nuevo en un momento o escríbenos por Instagram a @thedesertzone_.']);
+  if(st.nl) autoClose = setTimeout(close, 2500);
 });
 $('f-pj').addEventListener('submit', async e=>{
   e.preventDefault();
@@ -410,22 +429,15 @@ $('f-pj').addEventListener('submit', async e=>{
   if(val('pj-link') && !/^https?:\/\//i.test(val('pj-link'))) return err('pj-err','El link debe empezar con https://');
   err('pj-err','');
   const b=$('pj-btn'); b.disabled=true; b.textContent='Enviando…';
-  st.tried=true;
   st.pj = await save('projects','project',{founder:val('pj-name'),email:val('pj-email'),project:val('pj-title'),track:$('pj-track').value,stage:$('pj-stage').value,description:val('pj-desc'),link:val('pj-link'),joinTeam:$('pj-team').checked});
   b.disabled=false; b.textContent='Enviar proyecto →';
-  finish();
+  done(st.pj ? ['Proyecto recibido','Lo revisaremos y te escribiremos por email.']
+             : ['No se pudo enviar','Inténtalo de nuevo en un momento o escríbenos por Instagram a @thedesertzone_.']);
 });
-function finish(){
-  const t=$('done-title'), p=$('done-text');
-  if(st.nl&&st.pj){t.textContent='Bienvenido a TDZ';p.textContent='Quedaste suscrito y recibimos tu proyecto. Te escribiremos por email.';}
-  else if(st.pj){t.textContent='Proyecto recibido';p.textContent='Lo revisaremos y te escribiremos por email.';}
-  else if(st.nl){t.textContent='Ya estás dentro';p.textContent='Quedaste suscrito. Cuando quieras, comparte tu proyecto desde esta página.';}
-  else if(st.tried){t.textContent='Vista previa';p.textContent='No pudimos enviar tus datos en este momento. Escríbenos por Instagram a @thedesertzone_.';}
-  else {t.textContent='Gracias por visitarnos';p.textContent='Puedes suscribirte o compartir tu proyecto cuando quieras.';}
-  show('done');
-}
-(function(){ let seen=false; try{seen=sessionStorage.getItem('tdz-lab')==='1';}catch(e){}
-  if(!seen){ setTimeout(()=>{ if(overlay.hidden) show('newsletter'); },900); try{sessionStorage.setItem('tdz-lab','1');}catch(e){} } })();
+function done([title,text]){ $('done-title').textContent=title; $('done-text').textContent=text; show('done'); }
+
+/* El modal de newsletter aparece siempre al abrir la página. */
+setTimeout(()=>{ if(overlay.hidden) show('newsletter'); }, 900);
 </script>
 
 </body>
